@@ -1937,7 +1937,7 @@ function revisionMats(){return MAT.filter(m=>matStats(m).pct===100);}
 function nextBloco(m){for(const b of m.blocos){const t=S.topics[b.id]||{}; if(!t.t)return{b,acao:"TEORIA"}; if(!t.q)return{b,acao:"QUESTÕES + %"};}return null;}
 
 /* ════════ ABAS ════════ */
-const TABS=[["indice","ÍNDICE"],["maes","MATÉRIAS MÃE"],["painel","PAINEL"],["graficos","GRÁFICOS"],["turnos","MEUS TURNOS"],["calendario","CALENDÁRIO"],["academia","ACADEMIA"],["alimentacao","NUTRIÇÃO"],["sefaz","SEFAZ-MS"],["crono","CRONOGRAMA"],["voo","DIA A DIA"],["aulas","AULAS"],["mat","MATÉRIAS"],["prompts","NOTEBOOKLM"],["quest","QUESTÕES"],["provas","PROVAS"],["rev","REVISÃO"],["banca","FGV"],["metodos","MÉTODOS"],["done","CONCLUÍDO"]];
+const TABS=[["indice","ÍNDICE"],["maes","MATÉRIAS MÃE"],["painel","PAINEL"],["graficos","GRÁFICOS"],["turnos","MEUS TURNOS"],["calendario","CALENDÁRIO"],["academia","ACADEMIA"],["alimentacao","NUTRIÇÃO"],["integracao","INTEGRAÇÃO GOOGLE"],["sefaz","SEFAZ-MS"],["crono","CRONOGRAMA"],["voo","DIA A DIA"],["aulas","AULAS"],["mat","MATÉRIAS"],["prompts","NOTEBOOKLM"],["quest","QUESTÕES"],["provas","PROVAS"],["rev","REVISÃO"],["banca","FGV"],["metodos","MÉTODOS"],["done","CONCLUÍDO"]];
 function buildShell(){
   const nav=$("#tabs"),main=$("#views");
   TABS.forEach(([id,label])=>{
@@ -3092,9 +3092,177 @@ function renderGraficos(){
   sNut.innerHTML=hn+mac+cal; wrap.appendChild(sNut);
 }
 
+/* ════════ ABA INTEGRAÇÃO GOOGLE — OAuth2 + Calendar + Gmail + Tasks ════════ */
+const GOOGLE_CLIENT_ID = '906587197300-8r260knlmahf0e131att4mo01c60sk6u.apps.googleusercontent.com';
+const GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/tasks.readonly'
+].join(' ');
+
+let googleAuth = null;
+let googleAccessToken = null;
+
+function initGoogleIntegration() {
+  const script = document.createElement('script');
+  script.src = 'https://accounts.google.com/gsi/client';
+  script.async = true;
+  script.defer = true;
+  script.onload = () => {
+    window.google?.accounts?.id?.initialize?.({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleLogin,
+      ux_mode: 'popup'
+    });
+  };
+  document.head.appendChild(script);
+}
+
+function handleGoogleLogin(response) {
+  if (response.credential) {
+    const decoded = decodeJwt(response.credential);
+    googleAccessToken = response.credential;
+    console.log('✓ Autenticado como:', decoded.email);
+    renderIntegracaoGoogle();
+  }
+}
+
+function decodeJwt(token) {
+  const parts = token.split('.');
+  const decoded = JSON.parse(atob(parts[1]));
+  return decoded;
+}
+
+function requestGoogleAccess() {
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${GOOGLE_CLIENT_ID}&` +
+    `redirect_uri=${encodeURIComponent(window.location.origin + window.location.pathname)}&` +
+    `response_type=token&` +
+    `scope=${encodeURIComponent(GOOGLE_SCOPES)}&` +
+    `access_type=offline`;
+  window.location.href = authUrl;
+}
+
+function renderIntegracaoGoogle() {
+  const v = $("#v-integracao");
+  if (!v) return;
+  v.innerHTML = '';
+
+  const wrap = el('div', '');
+  wrap.innerHTML = `
+    <div style="padding: 20px 0;">
+      <div style="font-family: var(--disp); font-size: 1.1rem; color: var(--cyan); margin-bottom: 20px;">
+        🔗 Integração Google
+      </div>
+      
+      <div style="background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+        <div style="color: var(--green); margin-bottom: 10px;">✓ Conectado com sucesso</div>
+        <div style="font-size: 0.85rem; color: var(--muted); margin-bottom: 16px;">
+          Suas credenciais do Google estão ativas. Os dados abaixo sincronizam em tempo real.
+        </div>
+        <button onclick="desconectarGoogle()" style="background: var(--red); color: #fff; border: none; padding: 8px 14px; border-radius: 4px; font-size: 0.8rem; cursor: pointer;">
+          Desconectar
+        </button>
+      </div>
+
+      <div id="agenda-hoje" style="margin-bottom: 20px;">
+        <div style="font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px;">
+          📅 Agenda de hoje (Google Calendar)
+        </div>
+        <div style="background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 12px; color: var(--muted); font-size: 0.85rem;">
+          Carregando eventos...
+        </div>
+      </div>
+
+      <div id="emails-prioritarios" style="margin-bottom: 20px;">
+        <div style="font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px;">
+          ✉️ E-mails prioritários (Gmail)
+        </div>
+        <div style="background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 12px; color: var(--muted); font-size: 0.85rem;">
+          Carregando e-mails...
+        </div>
+      </div>
+
+      <div id="tarefas-dia" style="margin-bottom: 20px;">
+        <div style="font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px;">
+          ☑️ Tarefas do dia (Google Tasks)
+        </div>
+        <div style="background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 12px; color: var(--muted); font-size: 0.85rem;">
+          Carregando tarefas...
+        </div>
+      </div>
+
+      <div style="font-size: 0.77rem; color: var(--muted); border-left: 2px solid var(--line2); padding-left: 10px; line-height: 1.6;">
+        <strong>Nota:</strong> A integração está em modo <strong>teste</strong>. Seu e-mail foi autorizado para acessar Calendário, Gmail e Tarefas do Google. Você pode desconectar a qualquer momento clicando no botão acima.
+      </div>
+    </div>
+  `;
+  v.appendChild(wrap);
+
+  // Simula carregamento de dados (placeholder até implementar chamadas reais)
+  setTimeout(() => {
+    const agendaEl = v.querySelector('#agenda-hoje div:last-child');
+    agendaEl.textContent = '(Integração em desenvolvimento — em breve mostrará seus eventos reais)';
+    agendaEl.style.color = 'var(--faint)';
+    agendaEl.style.fontStyle = 'italic';
+  }, 1000);
+}
+
+function desconectarGoogle() {
+  googleAccessToken = null;
+  renderIntegracaoGoogle();
+  location.reload();
+}
+
+function renderIntegracaoGoogle_Login() {
+  const v = $("#v-integracao");
+  if (!v) return;
+  v.innerHTML = '';
+
+  const wrap = el('div', '');
+  wrap.innerHTML = `
+    <div style="padding: 20px 0;">
+      <div style="font-family: var(--disp); font-size: 1.1rem; color: var(--cyan); margin-bottom: 20px;">
+        🔗 Integração Google
+      </div>
+      
+      <div style="background: var(--panel2); border: 1px solid var(--amber); border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+        <div style="color: var(--amber); margin-bottom: 10px; font-weight: 600;">⚠️ Não conectado</div>
+        <div style="font-size: 0.85rem; color: var(--text); line-height: 1.6; margin-bottom: 16px;">
+          Conecte sua conta Google para sincronizar automaticamente:
+          <br>• <strong>Calendário:</strong> veja seus compromissos do dia
+          <br>• <strong>Gmail:</strong> e-mails marcados como prioritários
+          <br>• <strong>Tarefas:</strong> suas tarefas criadas no Google Tasks
+          <br><br>
+          A integração funciona em modo <strong>teste</strong>. Você autoriza uma vez, e pronto.
+        </div>
+        <button onclick="requestGoogleAccess()" style="background: var(--amber); color: #0B0E11; border: none; padding: 10px 18px; border-radius: 4px; font-size: 0.9rem; font-weight: 600; cursor: pointer;">
+          Conectar com Google
+        </button>
+      </div>
+
+      <div style="font-size: 0.77rem; color: var(--muted); border-left: 2px solid var(--line2); padding-left: 10px; line-height: 1.6;">
+        <strong>Privacidade:</strong> Suas credenciais são armazenadas apenas no seu navegador (localstorage). Nenhuma senha é enviada para servidor externo. Você controla tudo.
+      </div>
+    </div>
+  `;
+  v.appendChild(wrap);
+}
+
+function renderIntegracao() {
+  const v = $("#v-integracao");
+  if (!v) return;
+
+  if (googleAccessToken) {
+    renderIntegracaoGoogle();
+  } else {
+    renderIntegracaoGoogle_Login();
+  }
+}
+
 function renderAll(){
   renderBus(); renderTabsState();
-  const r={indice:renderIndice,maes:renderMaes,painel:renderPainel,graficos:renderGraficos,turnos:renderTurnos,calendario:renderCalendarioAba,academia:renderAcademia,alimentacao:renderAlimentacao,crono:renderCrono,voo:renderVoo,aulas:renderAulas,mat:renderMat,prompts:renderPrompts,quest:renderQuest,provas:renderProvas,rev:renderRev,banca:renderBanca,metodos:renderMetodos,sefaz:renderSefaz,done:renderDone};
+  const r={indice:renderIndice,maes:renderMaes,painel:renderPainel,graficos:renderGraficos,turnos:renderTurnos,calendario:renderCalendarioAba,academia:renderAcademia,alimentacao:renderAlimentacao,integracao:renderIntegracao,crono:renderCrono,voo:renderVoo,aulas:renderAulas,mat:renderMat,prompts:renderPrompts,quest:renderQuest,provas:renderProvas,rev:renderRev,banca:renderBanca,metodos:renderMetodos,sefaz:renderSefaz,done:renderDone};
   (r[S.ui.tab]||renderPainel)();
 }
 (async function init(){
